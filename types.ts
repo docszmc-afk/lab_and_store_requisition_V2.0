@@ -1,147 +1,160 @@
-import React from 'react';
 
-export enum Status {
-  DRAFT = 'Draft',
-  PENDING_CHAIRMAN_REVIEW = 'Pending Chairman Review',
-  PENDING_STORE_FULFILLMENT = 'Pending Store Fulfillment',
-  PENDING_AUDIT_REVIEW = 'Pending Audit Review', // Audit 1
-  PENDING_AUDIT_2_REVIEW = 'Pending Audit 2 Review', // Audit 2
-  PENDING_FINAL_APPROVAL = 'Pending Final Approval', // Chairman (for some flows)
-  PENDING_FINANCE_APPROVAL = 'Pending Finance Approval', // HOF
-  APPROVED = 'Approved',
-  REJECTED = 'Rejected',
-  RETURNED = 'Returned',
-  ORDERED = 'Ordered',
-  DELIVERED = 'Delivered',
-  SPLIT = 'Split (processed)'
+
+// User Roles
+export enum UserRole {
+  ADMIN = 'admin',
+  PHARMACY = 'pharmacy',
+  LAB = 'lab',
+  ACCOUNTS = 'accounts',
+  AUDIT = 'audit',
+  FINANCE = 'finance',
+  CHAIRMAN = 'chairman',
+  DOCTOR = 'doctor'
 }
 
-export type PaymentStatus = 'Unpaid' | 'Partially Paid' | 'Fully Paid';
+// User Profile
+export interface User {
+  id: string;
+  name: string;
+  email: string;
+  role: UserRole;
+  avatarUrl?: string;
+  department: string;
+}
 
-export enum Priority {
+// Specific Request Types
+export enum RequisitionType {
+  // Lab Types
+  LAB_PURCHASE_ORDER = 'Lab Purchase Order',
+  EQUIPMENT_REQUEST = 'Equipment Request',
+  OUTSOURCED_HISTOLOGY_PAYMENT = 'Outsourced Histology Payment',
+
+  // Pharmacy Types
+  PHARMACY_PURCHASE_ORDER = 'Pharmacy Purchase Order',
+  EMERGENCY_DRUG_PURCHASE_1_MONTH = 'Emergency Drug Purchase (1 month)',
+  EMERGENCY_DRUG_PURCHASE_1_WEEK = 'Emergency Drug Purchase (1 week)',
+  DAILY_DRUG_PURCHASE = 'Approval for Daily Drug Purchase',
+
+  // Fallback
+  GENERAL_REQUEST = 'General Request'
+}
+
+// Requisition Status
+export enum RequisitionStatus {
+  DRAFT = 'Draft',
+  PENDING = 'Pending Approval',
+  RETURNED = 'Returned', // For "Sent Back" requests
+  IN_REVIEW = 'In Review',
+  APPROVED = 'Approved',
+  REJECTED = 'Rejected',
+  FULFILLED = 'Fulfilled'
+}
+
+// Detailed Workflow Stages (Specifically for Lab PO)
+export enum WorkflowStage {
+  REQUESTER = 'Requester',
+  DRAFT_EDIT = 'Draft / Edit',
+  CHAIRMAN_INITIAL = 'Chairman (Initial)',
+  STORE_CHECK = 'Store Check',
+  AUDIT_ONE = 'Audit 1',
+  AUDIT_TWO = 'Audit 2',
+  CHAIRMAN_FINAL = 'Chairman (Final)',
+  HOF_APPROVAL = 'Head of Finance',
+  COMPLETED = 'Completed'
+}
+
+// Urgency Levels
+export enum UrgencyLevel {
   LOW = 'Low',
-  MEDIUM = 'Medium',
+  NORMAL = 'Normal',
   HIGH = 'High',
   CRITICAL = 'Critical'
 }
 
-export enum Department {
-  EMERGENCY = 'Emergency',
-  PEDIATRICS = 'Pediatrics',
-  SURGERY = 'Surgery',
-  PHARMACY = 'Pharmacy',
-  ADMINISTRATION = 'Administration',
-  LABORATORY = 'Laboratory'
-}
-
-export enum UserRole {
-  LAB_ADMIN = 'Lab Admin',
-  PHARMACY_ADMIN = 'Pharmacy Admin',
-  HEAD_OF_FINANCE = 'Head of Finance',
-  ACCOUNTANT = 'Accountant',
-  CHAIRMAN = 'Chairman',
-  AUDITOR = 'Auditor'
-}
-
-export type RequisitionType = 
-  | 'Lab Purchase Order' 
-  | 'Equipment Request' 
-  | 'Outsourced Histology Payment'
-  | 'Pharmacy Purchase Order'
-  | 'Emergency Request (1 month)'
-  | 'Emergency Request (1 week)'
-  | 'General Request';
-
-export interface User {
-  id: string;
-  email: string;
-  name: string;
-  role: UserRole;
-  department?: Department;
-}
-
+// Requisition Item
 export interface RequisitionItem {
   id: string;
   name: string;
+  stockLevel?: number;
   quantity: number;
   unit: string;
-  estimatedCost: number; // Used for initial estimates
-  stockLevel?: number; // Added for Lab PO
-  supplier?: string; // Added for Store fulfillment
-  unitCost?: number; // Added for Store fulfillment (actual cost)
-  category: string;
-  // Added for Histology
+  notes?: string;
+  // Store Fields
+  unitPrice?: number;
+  supplier?: string;
+  isAvailable?: boolean; // If false, item is skipped in PO generation
+
+  // Outsourced Histology Fields
+  customDate?: string;
   patientName?: string;
+  hospitalNumber?: string;
   labNumber?: string;
-  retainership?: number;
-  zmcCharge?: number;
+  paymentReference?: string; // Receipt No/HMO/COY
+  zmcPrice?: number; // ZMC Charges
+  retainership?: string;
+  
+  // Emergency Drug Fields
+  payee?: string;
 }
 
-export interface AuditLog {
+// Approval Signature Record
+export interface Approval {
   id: string;
-  date: string;
-  userName: string;
-  userRole: UserRole;
-  action: 'Created' | 'Approved' | 'Rejected' | 'Returned' | 'Updated' | 'Final Approval' | 'Consulted Audit' | 'Advice Submitted' | 'Split' | 'Payment Recorded';
-  comment?: string;
-  signature?: string; // Base64 image string
+  approverId: string;
+  approverName: string;
+  role: UserRole;
+  department: string;
+  stage: WorkflowStage;
+  timestamp: string; // ISO Date
+  signatureType: 'DRAWN' | 'STAMP';
+  signatureData: string; // Base64 string for drawn, or "VALIDATED_STAMP" for password
+  comment?: string; // Reason for rejection, return, or general notes
 }
 
-export interface Attachment {
-  name: string;
-  type: string;
-  data: string; // Base64 string
-}
-
-export interface PaymentRecord {
+// Payment Record
+export interface Payment {
   id: string;
-  date: string;
   amount: number;
-  reference: string;
+  date: string;
   recordedBy: string;
-  attachment?: Attachment;
+  notes?: string;
+  evidenceUrl?: string; // Attachment URL for receipt/proof
 }
 
+// Requisition Record
 export interface Requisition {
   id: string;
-  type: RequisitionType;
+  requesterId: string;
   requesterName: string;
-  requesterEmail: string; // Added for Notifications
-  department: Department;
-  date: string;
-  status: Status;
-  priority: Priority;
-  items: RequisitionItem[];
-  totalEstimatedCost: number;
-  
-  title?: string; // Added for Emergency Request (1 week) Header
-  justification?: string; // Added for Equipment Request & Emergency Request Purpose
-  beneficiary?: string; // Added for Emergency Request (1 month)
-  amountInWords?: string; // Added for Emergency Request
-  
-  aiAnalysis?: string;
-  auditTrail: AuditLog[];
-  attachments: Attachment[]; // Updated from string[]
-  
-  // Financials
-  amountPaid: number;
-  paymentStatus: PaymentStatus;
-  paymentRecords: PaymentRecord[];
-}
-
-export interface Notification {
-  id: string;
-  recipientEmail: string;
+  department: string;
+  type: RequisitionType; 
   title: string;
-  message: string;
-  date: string;
-  read: boolean;
-  relatedRequisitionId?: string;
-  type: 'info' | 'success' | 'warning' | 'error';
+  createdAt: string; // ISO Date
+  updatedAt: string; // ISO Date
+  status: RequisitionStatus;
+  currentStage?: WorkflowStage;
+  urgency: UrgencyLevel;
+  items: RequisitionItem[];
+  approverId?: string;
+  rejectionReason?: string;
+  
+  // Attachments (Can be string URLs or File objects converted to ObjectURLs)
+  attachments?: { name: string; url: string; type: string }[];
+  
+  // Approval History
+  approvals: Approval[];
+  
+  // Payment History (For Accounts)
+  payments?: Payment[];
+
+  // For split POs
+  isParent?: boolean;
+  parentId?: string;
+  childRequisitionIds?: string[];
 }
 
-export interface NavItem {
-  label: string;
-  icon: React.ReactNode;
-  id: string;
+// Mock Database Structure
+export interface Database {
+  users: User[];
+  requisitions: Requisition[];
 }

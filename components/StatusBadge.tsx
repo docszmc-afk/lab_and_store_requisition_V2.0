@@ -1,41 +1,72 @@
-import React from 'react';
-import { Status, Priority } from '../types';
 
-export const StatusBadge: React.FC<{ status: Status }> = ({ status }) => {
-  const styles = {
-    [Status.DRAFT]: 'bg-gray-100 text-gray-600 border-gray-200',
-    [Status.PENDING_CHAIRMAN_REVIEW]: 'bg-purple-100 text-purple-700 border-purple-200',
-    [Status.PENDING_STORE_FULFILLMENT]: 'bg-blue-100 text-blue-700 border-blue-200',
-    [Status.PENDING_AUDIT_REVIEW]: 'bg-yellow-100 text-yellow-700 border-yellow-200',
-    [Status.PENDING_AUDIT_2_REVIEW]: 'bg-amber-100 text-amber-800 border-amber-200',
-    [Status.PENDING_FINAL_APPROVAL]: 'bg-indigo-100 text-indigo-700 border-indigo-200',
-    [Status.PENDING_FINANCE_APPROVAL]: 'bg-teal-100 text-teal-700 border-teal-200',
-    [Status.APPROVED]: 'bg-green-100 text-green-700 border-green-200',
-    [Status.REJECTED]: 'bg-red-100 text-red-700 border-red-200',
-    [Status.RETURNED]: 'bg-orange-100 text-orange-700 border-orange-200',
-    [Status.ORDERED]: 'bg-cyan-100 text-cyan-700 border-cyan-200',
-    [Status.DELIVERED]: 'bg-gray-800 text-white border-gray-900',
-    [Status.SPLIT]: 'bg-gray-200 text-gray-500 border-gray-300 line-through',
-  };
+import React from 'react';
+import { RequisitionStatus, UrgencyLevel, WorkflowStage } from '../types';
+
+export const StatusBadge: React.FC<{ status: RequisitionStatus }> = ({ status }) => {
+  let colorClass = '';
+
+  switch (status) {
+    case RequisitionStatus.APPROVED:
+      colorClass = 'bg-green-100 text-green-800 border-green-200';
+      break;
+    case RequisitionStatus.PENDING:
+      colorClass = 'bg-amber-100 text-amber-800 border-amber-200';
+      break;
+    case RequisitionStatus.IN_REVIEW:
+      colorClass = 'bg-blue-50 text-blue-800 border-blue-100';
+      break;
+    case RequisitionStatus.RETURNED:
+      colorClass = 'bg-rose-100 text-rose-800 border-rose-200';
+      break;
+    case RequisitionStatus.REJECTED:
+      colorClass = 'bg-red-100 text-red-800 border-red-200';
+      break;
+    case RequisitionStatus.FULFILLED:
+      colorClass = 'bg-blue-100 text-blue-800 border-blue-200';
+      break;
+    default:
+      colorClass = 'bg-gray-100 text-gray-800 border-gray-200';
+  }
 
   return (
-    <span className={`px-3 py-1 rounded-full text-[10px] font-medium border uppercase tracking-wide whitespace-nowrap ${styles[status]}`}>
+    <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium border ${colorClass}`}>
       {status}
     </span>
   );
 };
 
-export const PriorityBadge: React.FC<{ priority: Priority }> = ({ priority }) => {
-    const styles = {
-        [Priority.LOW]: 'text-gray-500',
-        [Priority.MEDIUM]: 'text-blue-500',
-        [Priority.HIGH]: 'text-orange-600 font-semibold',
-        [Priority.CRITICAL]: 'text-red-600 font-bold animate-pulse'
-    }
-    
-    return (
-        <span className={`text-xs uppercase tracking-wider ${styles[priority]}`}>
-            {priority}
-        </span>
-    )
-}
+export const StageBadge: React.FC<{ stage?: WorkflowStage }> = ({ stage }) => {
+  if (!stage) return null;
+
+  return (
+    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium text-gray-600 bg-gray-100 border border-gray-200">
+      <span className="w-1.5 h-1.5 rounded-full bg-zankli-orange"></span>
+      {stage}
+    </span>
+  );
+};
+
+export const UrgencyBadge: React.FC<{ level: UrgencyLevel }> = ({ level }) => {
+  let colorClass = '';
+
+  switch (level) {
+    case UrgencyLevel.CRITICAL:
+      colorClass = 'bg-red-50 text-red-700 ring-1 ring-inset ring-red-600/20';
+      break;
+    case UrgencyLevel.HIGH:
+      colorClass = 'bg-orange-50 text-orange-700 ring-1 ring-inset ring-orange-600/20';
+      break;
+    case UrgencyLevel.NORMAL:
+      colorClass = 'bg-blue-50 text-blue-700 ring-1 ring-inset ring-blue-700/10';
+      break;
+    case UrgencyLevel.LOW:
+      colorClass = 'bg-gray-50 text-gray-600 ring-1 ring-inset ring-gray-500/10';
+      break;
+  }
+
+  return (
+    <span className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ${colorClass}`}>
+      {level}
+    </span>
+  );
+};
