@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, Send, CheckCircle2, ClipboardList, Zap, Microscope, Pill, CalendarClock, ArrowLeft, Upload, X, Clock } from 'lucide-react';
+import { Plus, Trash2, Send, CheckCircle2, ClipboardList, Zap, Microscope, Pill, CalendarClock, ArrowLeft, Upload, X, Clock, Sparkles } from 'lucide-react';
 import { UrgencyLevel, RequisitionType, UserRole, WorkflowStage, Approval, RequisitionStatus, Requisition } from '../types';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -8,6 +8,9 @@ import { useRequisition } from '../contexts/RequisitionContext';
 import SignatureModal from '../components/SignatureModal';
 import { numberToWords, fileToBase64 } from '../utils';
 import { supabase } from '../lib/supabase';
+
+// Declare XLSX for client-side parsing
+declare var XLSX: any;
 
 const NewRequisition: React.FC = () => {
   const navigate = useNavigate();
@@ -122,6 +125,101 @@ const NewRequisition: React.FC = () => {
         alert("Error uploading file");
       }
     }
+  };
+  
+  // Smart Excel Import Logic
+  const handleExcelImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Use FileReader + SheetJS to parse content
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+        try {
+            const bstr = evt.target?.result;
+            // @ts-ignore
+            const wb = XLSX.read(bstr, { type: 'binary' });
+            const wsname = wb.SheetNames[0];
+            const ws = wb.Sheets[wsname];
+            // @ts-ignore
+            const data = XLSX.utils.sheet_to_json(ws, { header: 1 }); // Read as array of arrays
+
+            if (!data || data.length === 0) return;
+
+            // Simple "AI" Heuristics to find columns
+            const rawHeaders = data[0] as any[] || [];
+            // Use Array.from to safely handle sparse arrays (empty header cells)
+            const headers = Array.from(rawHeaders).map(h => h ? String(h).toLowerCase().trim() : '');
+            
+            // Helper: Find column index with exclusions
+            const getIndex = (keywords: string[], excludes: string[] = []) => {
+                // 1. Exact match priority (check if header strictly equals a keyword)
+                const exact = headers.findIndex(h => keywords.some(k => h === k));
+                if (exact !== -1) return exact;
+
+                // 2. Partial match (excluding 'excludes')
+                return headers.findIndex(h => 
+                    keywords.some(k => h.includes(k)) && 
+                    !excludes.some(e => h.includes(e))
+                );
+            };
+
+            // Smart Map
+            const nameIdx = getIndex(['description', 'item', 'name', 'drug', 'product', 'medicine']);
+            
+            // Updated Quantity Logic: Exclude stock-related terms
+            const qtyIdx = getIndex(['qty', 'quantity', 'count', 'needed', 'req'], ['stock', 'level', 'hand', 'balance', 'available']);
+            
+            const unitIdx = getIndex(['unit', 'pack', 'form', 'type']);
+            
+            // Price often called 'price', 'cost', 'rate'. Sometimes 'amount' (if not quantity).
+            const priceIdx = getIndex(['price', 'rate', 'cost', 'unit price', 'amount'], ['total']);
+            
+            const supplierIdx = getIndex(['supplier', 'vendor', 'source']);
+
+            if (nameIdx === -1) {
+                alert("Could not identify 'Item Name' or 'Description' column. Please check your Excel headers.");
+                return;
+            }
+
+            const extractedItems = (data.slice(1) as any[]).map((row) => {
+                // Handle sparse data rows safely
+                if (!row) return null;
+                
+                const name = row[nameIdx];
+                if (!name) return null; // Skip empty rows
+
+                return {
+                    id: Date.now() + Math.random(),
+                    name: String(name),
+                    quantity: qtyIdx !== -1 ? (parseInt(row[qtyIdx]) || 1) : 1,
+                    unit: unitIdx !== -1 ? (row[unitIdx] || 'pcs') : 'pcs',
+                    unitPrice: priceIdx !== -1 ? (parseFloat(row[priceIdx]) || '') : '',
+                    supplier: supplierIdx !== -1 ? (row[supplierIdx] || '') : '',
+                    stockLevel: 0,
+                    isAvailable: true,
+                    notes: '',
+                    payee: ''
+                };
+            }).filter(Boolean);
+
+            if (extractedItems.length > 0) {
+                // If the current list only has one empty item, replace it. Otherwise append.
+                if (items.length === 1 && !items[0].name) {
+                    setItems(extractedItems);
+                } else {
+                    setItems([...items, ...extractedItems]);
+                }
+                alert(`✨ Successfully extracted ${extractedItems.length} items from Excel!`);
+            } else {
+                alert("No valid items found in the file.");
+            }
+        } catch (error) {
+            console.error("Excel parse error:", error);
+            alert("Failed to parse Excel file. Ensure it is a valid .xlsx or .xls file.");
+        }
+    };
+    reader.readAsBinaryString(file);
   };
 
   const removeAttachment = (index: number) => {
@@ -314,6 +412,27 @@ const NewRequisition: React.FC = () => {
                     <h3 className="font-semibold text-gray-900">
                       {(isEmergencyDrug1Month || isEmergencyDrug1Week) ? 'Payment Details' : isHistology ? 'Histology Details' : 'Items Needed'}
                     </h3>
+                    
+                    {/* "AI" Excel Import Button - Only for Pharmacy PO */}
+                    {isPharmacyPO && (
+                      <div className="relative">
+                        <input 
+                            type="file" 
+                            id="excel-upload" 
+                            className="hidden" 
+                            accept=".xlsx, .xls"
+                            onChange={handleExcelImport}
+                        />
+                        <label 
+                            htmlFor="excel-upload"
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-r from-emerald-500 to-teal-500 rounded-full cursor-pointer hover:shadow-md transition-all transform hover:-translate-y-0.5"
+                            title="Automatically extract items from an Excel file"
+                        >
+                            <Sparkles size={14} />
+                            Smart Import from Excel
+                        </label>
+                      </div>
+                    )}
                   </div>
 
                   {(isEmergencyDrug1Month || isEmergencyDrug1Week) ? (
