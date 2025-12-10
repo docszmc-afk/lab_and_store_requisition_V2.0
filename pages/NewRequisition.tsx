@@ -164,7 +164,84 @@ const NewRequisition: React.FC = () => {
                 );
             };
 
-            // Smart Map
+            // HISTOLOGY IMPORT LOGIC
+            if (isHistology) {
+                const dateIdx = getIndex(['date', 'created']);
+                const patientIdx = getIndex(['patient', 'name', 'client'], ['test', 'service', 'investigation']);
+                const hospIdx = getIndex(['hospital', 'hosp', 'mrn', 'file', 'folder', 'card']);
+                const labIdx = getIndex(['lab', 'accession']);
+                const testIdx = getIndex(['test', 'investigation', 'service', 'specimen', 'description']); // Map to 'name'
+                const billIdx = getIndex(['bill', 'price', 'amount', 'cost', 'outsource'], ['zmc', 'charge']); // Map to 'unitPrice'
+                const zmcIdx = getIndex(['zmc', 'charge']); // Map to 'zmcPrice'
+                const refIdx = getIndex(['receipt', 'ref', 'hmo', 'payment']); // Map to 'paymentReference'
+                const retainIdx = getIndex(['retain', 'category']); // Map to 'retainership'
+
+                if (patientIdx === -1 && testIdx === -1) {
+                    alert("Could not identify 'Patient Name' or 'Test/Service' columns. Please check your Excel headers.");
+                    return;
+                }
+
+                const extractedItems = (data.slice(1) as any[]).map((row) => {
+                    // Handle sparse data
+                    if (!row) return null;
+                    
+                    // Validation: Need at least patient or test name
+                    const pName = patientIdx !== -1 ? row[patientIdx] : '';
+                    const tName = testIdx !== -1 ? row[testIdx] : '';
+                    if (!pName && !tName) return null;
+
+                    // Date parsing helper (Excel serial -> JS Date -> YYYY-MM-DD)
+                    let dateVal = '';
+                    if (dateIdx !== -1 && row[dateIdx]) {
+                        const val = row[dateIdx];
+                        if (typeof val === 'number') {
+                            try {
+                                // Excel epoch (1900) adjustment
+                                const d = new Date(Math.round((val - 25569) * 86400 * 1000));
+                                dateVal = d.toISOString().split('T')[0];
+                            } catch(e) {}
+                        } else {
+                            // Try string parse
+                            const d = new Date(val);
+                            if (!isNaN(d.getTime())) {
+                                dateVal = d.toISOString().split('T')[0];
+                            }
+                        }
+                    }
+
+                    return {
+                        id: Date.now() + Math.random(),
+                        customDate: dateVal,
+                        patientName: pName ? String(pName) : '',
+                        hospitalNumber: hospIdx !== -1 ? String(row[hospIdx] || '') : '',
+                        labNumber: labIdx !== -1 ? String(row[labIdx] || '') : '',
+                        name: tName ? String(tName) : '', // Test Name
+                        unitPrice: billIdx !== -1 ? (parseFloat(row[billIdx]) || '') : '',
+                        zmcPrice: zmcIdx !== -1 ? (parseFloat(row[zmcIdx]) || '') : '',
+                        paymentReference: refIdx !== -1 ? String(row[refIdx] || '') : '',
+                        retainership: retainIdx !== -1 ? String(row[retainIdx] || '') : '',
+                        quantity: 1, // Default to 1
+                        stockLevel: 0,
+                        isAvailable: true,
+                        notes: '',
+                        payee: ''
+                    };
+                }).filter(Boolean);
+
+                if (extractedItems.length > 0) {
+                    if (items.length === 1 && !items[0].patientName && !items[0].name) {
+                        setItems(extractedItems);
+                    } else {
+                        setItems([...items, ...extractedItems]);
+                    }
+                    alert(`✨ Successfully extracted ${extractedItems.length} records from Excel!`);
+                } else {
+                    alert("No valid records found in the file.");
+                }
+                return; // Stop here for Histology
+            }
+
+            // PHARMACY / GENERAL IMPORT LOGIC
             const nameIdx = getIndex(['description', 'item', 'name', 'drug', 'product', 'medicine']);
             
             // Updated Quantity Logic: Exclude stock-related terms
@@ -413,8 +490,8 @@ const NewRequisition: React.FC = () => {
                       {(isEmergencyDrug1Month || isEmergencyDrug1Week) ? 'Payment Details' : isHistology ? 'Histology Details' : 'Items Needed'}
                     </h3>
                     
-                    {/* "AI" Excel Import Button - Only for Pharmacy PO */}
-                    {isPharmacyPO && (
+                    {/* "AI" Excel Import Button - Only for Pharmacy PO OR Histology */}
+                    {(isPharmacyPO || isHistology) && (
                       <div className="relative">
                         <input 
                             type="file" 
