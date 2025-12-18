@@ -1,11 +1,12 @@
+
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { Menu, Bell, CheckCircle, AlertCircle, Clock, Info, X } from 'lucide-react';
+import { Menu, Bell, CheckCircle, AlertCircle, Clock, Info, X, Zap, ChevronRight, TriangleAlert } from 'lucide-react';
 import Sidebar from './Sidebar';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useRequisition } from '../contexts/RequisitionContext';
 import { useAuth } from '../contexts/AuthContext';
 import { RequisitionStatus, WorkflowStage, UserRole } from '../types';
-import { formatDateTime } from '../utils';
+import { formatDateTime, isUserTurn } from '../utils';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -21,7 +22,6 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const { requisitions } = useRequisition();
   const { user } = useAuth();
 
-  // Close notifications when clicking outside
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (notifRef.current && !notifRef.current.contains(event.target as Node)) {
@@ -32,7 +32,6 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Determine header title based on route
   const getHeaderTitle = () => {
     switch (location.pathname) {
       case '/': return 'Dashboard';
@@ -43,146 +42,67 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     }
   };
 
-  // Generate Notifications based on real-time data
-  const notifications = useMemo(() => {
-    if (!user) return [];
-    const list: any[] = [];
-
-    requisitions.forEach(req => {
-        // 1. ACTION REQUIRED (For Approvers or Returned Requests)
-        let isMyTurn = false;
-        
-        // If Pending, check if stage matches user role
-        if (req.status === RequisitionStatus.PENDING) {
-             if (req.currentStage === WorkflowStage.CHAIRMAN_INITIAL && user.role === UserRole.CHAIRMAN) isMyTurn = true;
-             else if (req.currentStage === WorkflowStage.STORE_CHECK && user.role === UserRole.PHARMACY) isMyTurn = true;
-             else if ((req.currentStage === WorkflowStage.AUDIT_ONE || req.currentStage === WorkflowStage.AUDIT_TWO) && user.role === UserRole.AUDIT) isMyTurn = true;
-             else if (req.currentStage === WorkflowStage.CHAIRMAN_FINAL && user.role === UserRole.CHAIRMAN) isMyTurn = true;
-             else if (req.currentStage === WorkflowStage.HOF_APPROVAL && user.role === UserRole.FINANCE) isMyTurn = true;
-        } else if (req.status === RequisitionStatus.RETURNED && req.requesterId === user.id) {
-            isMyTurn = true;
-        }
-
-        if (isMyTurn) {
-            list.push({
-                id: `act_${req.id}`,
-                type: 'ACTION',
-                title: req.status === RequisitionStatus.RETURNED ? 'Request Returned' : 'Approval Required',
-                msg: `${req.title} is waiting for your input.`,
-                time: req.updatedAt,
-                link: `/requisitions/${req.id}`
-            });
-        }
-
-        // 2. UPDATES (For Requester)
-        if (req.requesterId === user.id && req.status !== RequisitionStatus.DRAFT) {
-            // Simple logic: if updated recently (last 24h) and not action required
-            const isRecent = new Date(req.updatedAt).getTime() > Date.now() - 86400000;
-            if (isRecent && !isMyTurn) {
-                 list.push({
-                    id: `upd_${req.id}`,
-                    type: 'UPDATE',
-                    title: `Request ${req.status}`,
-                    msg: `${req.title} is now at ${req.currentStage || 'Completed'}.`,
-                    time: req.updatedAt,
-                    link: `/requisitions/${req.id}`
-                });
-            }
-        }
-    });
-
-    return list.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
+  // Simplified: If it is your turn AND the reminder count is > 0, you MUST see the alert.
+  const urgentReminders = useMemo(() => {
+      if (!user) return [];
+      return requisitions.filter(r => {
+          // 1. Is it currently my turn to sign this?
+          const isMyTurn = isUserTurn(r, user);
+          // 2. Has the requester sent at least one reminder?
+          const hasReminder = (r.reminderCount && r.reminderCount > 0);
+          
+          return isMyTurn && hasReminder;
+      });
   }, [requisitions, user]);
 
   return (
-    <div className="flex h-screen bg-zankli-cream overflow-hidden">
-      {/* Sidebar */}
-      <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
-
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Top Header */}
-        <header className="bg-white border-b border-stone-200 h-16 flex items-center justify-between px-4 sm:px-6 z-30">
-          <div className="flex items-center gap-3">
-            <button 
-              onClick={() => setIsSidebarOpen(true)}
-              className="lg:hidden p-2 rounded-lg text-gray-500 hover:bg-gray-100"
-            >
-              <Menu size={24} />
-            </button>
-            <h2 className="text-xl font-bold text-gray-800">{getHeaderTitle()}</h2>
-          </div>
-
-          <div className="flex items-center gap-4">
-             {/* Notification Bell */}
-             <div className="relative" ref={notifRef}>
-               <button 
-                 onClick={() => setShowNotifications(!showNotifications)}
-                 className="p-2 rounded-lg text-gray-500 hover:bg-gray-100 relative"
-               >
-                 <Bell size={24} />
-                 {notifications.length > 0 && (
-                   <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white"></span>
-                 )}
-               </button>
-
-               {/* Dropdown */}
-               {showNotifications && (
-                 <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white rounded-xl shadow-xl border border-stone-200 overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-200">
-                    <div className="p-4 border-b border-gray-100 flex items-center justify-between bg-gray-50">
-                       <h3 className="font-semibold text-gray-900">Notifications</h3>
-                       <button onClick={() => setShowNotifications(false)} className="text-gray-400 hover:text-gray-600"><X size={16} /></button>
-                    </div>
-                    <div className="max-h-[400px] overflow-y-auto">
-                      {notifications.length === 0 ? (
-                        <div className="p-8 text-center text-gray-500">
-                          <CheckCircle size={32} className="mx-auto mb-2 text-gray-300" />
-                          <p>You're all caught up!</p>
-                        </div>
-                      ) : (
-                        notifications.map((notif) => (
-                          <div 
-                            key={notif.id}
-                            onClick={() => {
-                                setShowNotifications(false);
-                                navigate(notif.link);
-                            }}
-                            className="p-4 border-b border-gray-50 hover:bg-orange-50 cursor-pointer transition-colors flex gap-3"
-                          >
-                             <div className={`mt-1 p-2 rounded-full ${notif.type === 'ACTION' ? 'bg-orange-100 text-orange-600' : 'bg-blue-100 text-blue-600'}`}>
-                                {notif.type === 'ACTION' ? <AlertCircle size={16} /> : <Info size={16} />}
-                             </div>
-                             <div>
-                               <p className="text-sm font-semibold text-gray-900">{notif.title}</p>
-                               <p className="text-xs text-gray-600 mt-0.5">{notif.msg}</p>
-                               <div className="flex items-center gap-1 mt-1.5 text-[10px] text-gray-400">
-                                 <Clock size={10} />
-                                 <span>{formatDateTime(notif.time)}</span>
-                               </div>
-                             </div>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                 </div>
-               )}
-             </div>
-             
-             {/* User Avatar (Desktop) */}
-             <div className="hidden sm:flex items-center gap-2 pl-4 border-l border-gray-200">
-                <div className="w-8 h-8 rounded-full bg-zankli-orange text-white flex items-center justify-center font-bold text-sm">
-                  {user?.name?.charAt(0)}
+    <div className="flex h-screen bg-zankli-cream overflow-hidden flex-col">
+      
+      {/* PERSISTENT GLOBAL EMERGENCY ALERT BAR - HIGH VISIBILITY */}
+      {urgentReminders.length > 0 && (
+          <div className="bg-red-700 text-white py-4 px-6 z-[100] flex items-center justify-between shadow-2xl sticky top-0 border-b-4 border-white animate-in slide-in-from-top duration-500">
+             <div className="flex items-center gap-4">
+                <div className="p-2 bg-white rounded-full text-red-700 shadow-md animate-bounce">
+                    <TriangleAlert size={24} fill="currentColor" />
+                </div>
+                <div className="flex flex-col">
+                    <span className="font-black uppercase tracking-widest text-lg leading-none">Emergency Attention Required!</span>
+                    <span className="text-sm opacity-95 font-bold mt-1">You have {urgentReminders.length} file(s) marked as URGENT awaiting your signature.</span>
                 </div>
              </div>
+             <button 
+                onClick={() => navigate(`/requisitions/${urgentReminders[0].id}`)}
+                className="bg-white text-red-700 px-6 py-2.5 rounded-xl font-black text-sm uppercase hover:bg-red-50 transition-all shadow-xl flex items-center gap-2 whitespace-nowrap active:scale-95 border-2 border-red-700 hover:border-red-800"
+             >
+                Review Critical Request <ChevronRight size={18} strokeWidth={4} />
+             </button>
           </div>
-        </header>
+      )}
 
-        {/* Scrollable Content */}
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
-          <div className="max-w-7xl mx-auto w-full">
-            {children}
-          </div>
-        </main>
+      <div className="flex flex-1 overflow-hidden">
+        <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
+        <div className="flex-1 flex flex-col overflow-hidden">
+            <header className="bg-white border-b border-stone-200 h-16 flex items-center justify-between px-4 sm:px-6 z-30">
+              <div className="flex items-center gap-3">
+                <button onClick={() => setIsSidebarOpen(true)} className="lg:hidden p-2 text-gray-500 hover:bg-gray-100"><Menu size={24} /></button>
+                <h2 className="text-xl font-bold text-gray-800">{getHeaderTitle()}</h2>
+              </div>
+              <div className="flex items-center gap-4">
+                 <div className="relative" ref={notifRef}>
+                   <button onClick={() => setShowNotifications(!showNotifications)} className="p-2 rounded-lg text-gray-500 hover:bg-gray-100 relative">
+                     <Bell size={24} />
+                     {(urgentReminders.length > 0) && <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white"></span>}
+                   </button>
+                 </div>
+                 <div className="hidden sm:flex items-center gap-2 pl-4 border-l">
+                    <div className="w-8 h-8 rounded-full bg-zankli-orange text-white flex items-center justify-center font-bold text-sm">{user?.name?.charAt(0)}</div>
+                 </div>
+              </div>
+            </header>
+            <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
+              <div className="max-w-7xl mx-auto w-full">{children}</div>
+            </main>
+        </div>
       </div>
     </div>
   );

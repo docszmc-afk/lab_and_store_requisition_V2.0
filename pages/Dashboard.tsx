@@ -15,7 +15,7 @@ import {
   Cell,
   Legend
 } from 'recharts';
-import { Package, Clock, CheckCircle, FileText, TrendingUp, DollarSign, Filter, BellRing, ChevronRight, AlertCircle, RefreshCcw } from 'lucide-react';
+import { Package, Clock, CheckCircle, FileText, TrendingUp, DollarSign, Filter, BellRing, ChevronRight, AlertCircle, RefreshCcw, ChevronLeft, Zap, ArrowRight } from 'lucide-react';
 import { StatusBadge } from '../components/StatusBadge';
 import { RequisitionStatus, UserRole } from '../types';
 import { formatDate, isUserTurn } from '../utils';
@@ -27,6 +27,11 @@ const Dashboard: React.FC = () => {
   const navigate = useNavigate();
   const [reportFilter, setReportFilter] = useState('');
   const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // Pagination State
+  const [generalPage, setGeneralPage] = useState(1);
+  const [accountsPage, setAccountsPage] = useState(1);
+  const ITEMS_PER_PAGE = 10;
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
@@ -43,6 +48,21 @@ const Dashboard: React.FC = () => {
     const actionRequired = requisitions.filter(r => isUserTurn(r, user)).length;
     
     return { total, pending, approved, urgent, actionRequired };
+  }, [requisitions, user]);
+
+  // Urgent Reminders Logic
+  const urgentReminders = useMemo(() => {
+      if (!user) return [];
+      return requisitions.filter(r => {
+          if (!isUserTurn(r, user)) return false;
+          // Check if reminded (count > 0)
+          if (r.reminderCount && r.reminderCount > 0) {
+               // Ensure it hasn't been updated since the reminder
+               if (r.lastRemindedAt && r.updatedAt && new Date(r.updatedAt) > new Date(r.lastRemindedAt)) return false;
+               return true;
+          }
+          return false;
+      });
   }, [requisitions, user]);
 
   // Accounts Specific Aggregations
@@ -89,8 +109,45 @@ const Dashboard: React.FC = () => {
     { name: 'Rejected', value: requisitions.filter(r => r.status === RequisitionStatus.REJECTED).length, color: '#ef4444' },
   ];
 
+  // Helper for Pagination Logic
+  const getPaginatedData = (data: any[], page: number) => {
+     const start = (page - 1) * ITEMS_PER_PAGE;
+     return data.slice(start, start + ITEMS_PER_PAGE);
+  };
+  
+  const getTotalPages = (totalItems: number) => Math.ceil(totalItems / ITEMS_PER_PAGE);
+
+  const PaginationControls = ({ page, totalItems, setPage }: { page: number, totalItems: number, setPage: (p: number) => void }) => {
+      const totalPages = getTotalPages(totalItems);
+      if (totalPages <= 1) return null;
+
+      return (
+          <div className="flex items-center justify-between px-6 py-3 border-t border-gray-100 bg-gray-50">
+              <span className="text-xs text-gray-500">Page {page} of {totalPages}</span>
+              <div className="flex gap-2">
+                  <button 
+                    onClick={() => setPage(Math.max(1, page - 1))}
+                    disabled={page === 1}
+                    className="p-1 rounded hover:bg-gray-200 disabled:opacity-30 disabled:hover:bg-transparent"
+                  >
+                      <ChevronLeft size={16} />
+                  </button>
+                  <button 
+                    onClick={() => setPage(Math.min(totalPages, page + 1))}
+                    disabled={page === totalPages}
+                    className="p-1 rounded hover:bg-gray-200 disabled:opacity-30 disabled:hover:bg-transparent"
+                  >
+                      <ChevronRight size={16} />
+                  </button>
+              </div>
+          </div>
+      );
+  };
+
   // --- ACCOUNTS DASHBOARD ---
   if (user?.role === UserRole.ACCOUNTS) {
+    const paginatedAccountsReqs = getPaginatedData(accountStats.approvedReqs, accountsPage);
+
     return (
         <div className="space-y-8">
              {/* Header */}
@@ -152,15 +209,12 @@ const Dashboard: React.FC = () => {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                {/* Recent Approved Requisitions (Limited to 20) */}
-                <div className="bg-white rounded-xl shadow-sm border border-stone-200 overflow-hidden flex flex-col h-[500px]">
+                {/* Recent Approved Requisitions */}
+                <div className="bg-white rounded-xl shadow-sm border border-stone-200 overflow-hidden flex flex-col h-[550px]">
                     <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
                         <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
                             <FileText size={18} /> Completed Requisitions
                         </h3>
-                        {accountStats.approvedReqs.length > 20 && (
-                            <button onClick={() => navigate('/requisitions')} className="text-sm text-zankli-orange font-medium hover:underline">View All</button>
-                        )}
                     </div>
                     <div className="flex-1 overflow-auto">
                         <table className="min-w-full divide-y divide-gray-200">
@@ -173,7 +227,7 @@ const Dashboard: React.FC = () => {
                                 </tr>
                             </thead>
                             <tbody className="bg-white divide-y divide-gray-200">
-                                {accountStats.approvedReqs.slice(0, 20).map(req => {
+                                {paginatedAccountsReqs.map(req => {
                                     const total = req.items.reduce((sum, i) => sum + ((i.unitPrice || 0) * i.quantity), 0);
                                     const paid = req.payments?.reduce((sum, p) => sum + p.amount, 0) || 0;
                                     return (
@@ -199,10 +253,11 @@ const Dashboard: React.FC = () => {
                             </tbody>
                         </table>
                     </div>
+                    <PaginationControls page={accountsPage} totalItems={accountStats.approvedReqs.length} setPage={setAccountsPage} />
                 </div>
 
                 {/* Item Purchase Report */}
-                <div className="bg-white rounded-xl shadow-sm border border-stone-200 overflow-hidden flex flex-col h-[500px]">
+                <div className="bg-white rounded-xl shadow-sm border border-stone-200 overflow-hidden flex flex-col h-[550px]">
                     <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-gray-50">
                         <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
                             <TrendingUp size={18} /> Item Purchase Report
@@ -247,8 +302,45 @@ const Dashboard: React.FC = () => {
   }
 
   // --- GENERAL DASHBOARD (Staff, Admin, Chairman, Audit) ---
+  const paginatedRequisitions = getPaginatedData(requisitions, generalPage);
+
   return (
     <div className="space-y-8">
+      {/* URGENT REMINDERS BANNER - High Visibility */}
+      {urgentReminders.length > 0 && (
+          <div className="bg-red-600 rounded-2xl p-6 shadow-xl shadow-red-200 border-l-8 border-white animate-in slide-in-from-top-4 duration-500">
+             <div className="flex flex-col md:flex-row items-center justify-between gap-6">
+                <div className="flex items-center gap-5 text-white">
+                    <div className="p-3 bg-white/20 rounded-full animate-pulse">
+                        <Zap size={32} fill="currentColor" />
+                    </div>
+                    <div>
+                        <h2 className="text-2xl font-bold uppercase tracking-wide">Action Required!</h2>
+                        <p className="text-red-100 font-medium text-lg">
+                            You have <span className="font-bold underline">{urgentReminders.length} urgent request(s)</span> pending your signature.
+                        </p>
+                    </div>
+                </div>
+                <div className="w-full md:w-auto flex flex-col gap-2">
+                    <button 
+                        onClick={() => navigate(`/requisitions/${urgentReminders[0].id}`)}
+                        className="bg-white text-red-600 hover:bg-red-50 px-8 py-3 rounded-xl font-bold text-lg shadow-lg transition-all transform hover:scale-105 flex items-center justify-center gap-2"
+                    >
+                        Review Now <ArrowRight size={20} />
+                    </button>
+                </div>
+             </div>
+             {/* Preview of the first urgent item */}
+             <div className="mt-4 pt-4 border-t border-red-500/50 flex items-center justify-between text-white/90 text-sm">
+                 <div className="flex items-center gap-2">
+                     <AlertCircle size={16} />
+                     <span className="font-bold">Urgent:</span> {urgentReminders[0].title}
+                 </div>
+                 <span>From: {urgentReminders[0].requesterName}</span>
+             </div>
+          </div>
+      )}
+
       {/* Welcome Header */}
       <div className="bg-gradient-to-r from-zankli-orange to-orange-600 rounded-2xl p-8 text-white shadow-lg shadow-orange-900/20 relative overflow-hidden">
         <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full blur-3xl -mr-16 -mt-16"></div>
@@ -268,8 +360,8 @@ const Dashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* Action Required Card (Only if needed) */}
-      {stats.actionRequired > 0 && (
+      {/* Action Required Card (Standard) */}
+      {stats.actionRequired > 0 && urgentReminders.length === 0 && (
         <div 
             onClick={() => navigate('/requisitions?tab=action')}
             className="bg-white border-l-4 border-zankli-orange rounded-xl shadow-sm p-6 flex items-center justify-between animate-in fade-in slide-in-from-top-4 cursor-pointer hover:bg-orange-50 transition-colors"
@@ -319,18 +411,10 @@ const Dashboard: React.FC = () => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {/* Recent Requisitions List (Limited to 20) */}
-        <div className="bg-white rounded-xl shadow-sm border border-stone-200 flex flex-col h-[400px]">
+        {/* Recent Requisitions List - Now with Pagination */}
+        <div className="bg-white rounded-xl shadow-sm border border-stone-200 flex flex-col h-[550px]">
           <div className="p-6 border-b border-gray-100 flex justify-between items-center">
             <h3 className="font-bold text-gray-900">Recent Requisitions</h3>
-            {stats.total > 20 && (
-                <button 
-                    onClick={() => navigate('/requisitions')} 
-                    className="text-sm text-zankli-orange hover:text-orange-700 font-medium flex items-center gap-1"
-                >
-                    View All <ChevronRight size={16} />
-                </button>
-            )}
           </div>
           <div className="flex-1 overflow-y-auto">
             {requisitions.length === 0 ? (
@@ -340,7 +424,7 @@ const Dashboard: React.FC = () => {
               </div>
             ) : (
               <div className="divide-y divide-gray-100">
-                {requisitions.slice(0, 20).map((req) => (
+                {paginatedRequisitions.map((req) => (
                   <div 
                     key={req.id} 
                     onClick={() => navigate(`/requisitions/${req.id}`)}
@@ -363,10 +447,12 @@ const Dashboard: React.FC = () => {
               </div>
             )}
           </div>
+          {/* Pagination Footer */}
+          <PaginationControls page={generalPage} totalItems={requisitions.length} setPage={setGeneralPage} />
         </div>
 
         {/* Status Chart */}
-        <div className="bg-white rounded-xl shadow-sm border border-stone-200 p-6 h-[400px]">
+        <div className="bg-white rounded-xl shadow-sm border border-stone-200 p-6 h-[550px]">
           <h3 className="font-bold text-gray-900 mb-6">Request Status Overview</h3>
           <ResponsiveContainer width="100%" height="85%">
             <PieChart>

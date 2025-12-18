@@ -19,32 +19,60 @@ export const RequisitionProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const { user } = useAuth();
 
   // Mapper: DB Row (snake_case) -> Requisition (camelCase)
-  const mapToRequisition = (row: any): Requisition => ({
-    id: row.id,
-    requesterId: row.requester_id,
-    requesterName: row.requester_name,
-    department: row.department,
-    type: row.type,
-    title: row.title,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-    status: row.status,
-    currentStage: row.current_stage,
-    urgency: row.urgency,
-    items: row.items || [],
-    // Attachments and Approvals might be missing in the light fetch
-    attachments: row.attachments || [],
-    approvals: row.approvals || [],
-    payments: row.payments || [],
-    rejectionReason: row.rejection_reason,
-    parentId: row.parent_id,
-    isParent: row.is_parent,
-    childRequisitionIds: row.child_requisition_ids
-  });
+  const mapToRequisition = (row: any): Requisition => {
+    // Defensive JSON parsing
+    let items = [];
+    if (Array.isArray(row.items)) items = row.items;
+    else if (typeof row.items === 'string') {
+        try { items = JSON.parse(row.items); } catch(e) { console.warn('Failed to parse items for req', row.id); }
+    }
+
+    // Attachments should ideally be empty in list view for performance
+    let attachments = [];
+    if (Array.isArray(row.attachments)) attachments = row.attachments;
+    else if (typeof row.attachments === 'string') {
+        try { attachments = JSON.parse(row.attachments); } catch(e) {}
+    }
+
+    let approvals = [];
+    if (Array.isArray(row.approvals)) approvals = row.approvals;
+    else if (typeof row.approvals === 'string') {
+        try { approvals = JSON.parse(row.approvals); } catch(e) {}
+    }
+
+    let payments = [];
+    if (Array.isArray(row.payments)) payments = row.payments;
+    else if (typeof row.payments === 'string') {
+        try { payments = JSON.parse(row.payments); } catch(e) {}
+    }
+
+    return {
+      id: row.id,
+      requesterId: row.requester_id,
+      requesterName: row.requester_name,
+      department: row.department,
+      type: row.type,
+      title: row.title,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      status: row.status,
+      currentStage: row.current_stage,
+      urgency: row.urgency,
+      items: items,
+      attachments: attachments, 
+      approvals: approvals,
+      payments: payments,
+      rejectionReason: row.rejection_reason,
+      parentId: row.parent_id,
+      isParent: row.is_parent,
+      childRequisitionIds: row.child_requisition_ids,
+      lastRemindedAt: row.last_reminded_at,
+      reminderCount: row.reminder_count
+    };
+  };
 
   // Mapper: Requisition (camelCase) -> DB Row (snake_case)
   const mapFromRequisition = (req: Requisition) => {
-    // Only include fields that are defined to avoid overwriting with null/undefined if we are working with partial data
     const payload: any = {
       id: req.id,
       requester_id: req.requesterId,
@@ -64,41 +92,65 @@ export const RequisitionProvider: React.FC<{ children: React.ReactNode }> = ({ c
       child_requisition_ids: req.childRequisitionIds
     };
 
-    // Only add heavy fields or optional fields if they exist to prevent issues
+    // Only include heavy fields if they are actually present in the object
     if (req.attachments !== undefined) payload.attachments = req.attachments;
     if (req.approvals !== undefined) payload.approvals = req.approvals;
-    // Explicitly handle payments to ensure we don't send undefined
     if (req.payments) payload.payments = req.payments;
+    if (req.lastRemindedAt) payload.last_reminded_at = req.lastRemindedAt;
+    if (req.reminderCount !== undefined) payload.reminder_count = req.reminderCount;
 
     return payload;
   };
 
   const fetchRequisitions = async () => {
-    // If not logged in yet, don't fetch from DB to avoid RLS errors
     if (!user) {
         setRequisitions([]);
         return;
     }
 
     try {
-        // PERFORMANCE FIX: Select specific columns EXCLUDING 'attachments' and 'approvals' (base64 data)
-        // This ensures the list loads instantly. Full data is fetched in detail view.
-        const { data, error } = await supabase
+        // PERFORMANCE CRITICAL: 
+        // We explicitly define columns to exclude 'attachments'.
+        // This makes the query lightweight and fast.
+        
+        // Strategy 1: Ideal Query (Includes reminder columns)
+        const idealColumns = 'id,requester_id,requester_name,department,type,title,created_at,updated_at,status,current_stage,urgency,items,approvals,payments,rejection_reason,parent_id,is_parent,child_requisition_ids,last_reminded_at,reminder_count';
+        
+        // Strategy 2: Safe Fallback (Excludes reminder columns if migration hasn't run yet, BUT STILL EXCLUDES ATTACHMENTS)
+        const safeColumns = 'id,requester_id,requester_name,department,type,title,created_at,updated_at,status,current_stage,urgency,items,approvals,payments,rejection_reason,parent_id,is_parent,child_requisition_ids';
+
+        let { data, error } = await supabase
             .from('requisitions')
-            .select(`
-              id, requester_id, requester_name, department, type, title, 
-              created_at, updated_at, status, current_stage, urgency, 
-              rejection_reason, parent_id, is_parent, child_requisition_ids, items, payments
-            `)
+            .select(idealColumns)
             .order('created_at', { ascending: false });
 
+        // If ideal query fails (likely due to missing reminder columns), use safe fallback
         if (error) {
-            console.error('Error fetching requisitions:', error);
+            console.warn('Optimized fetch failed (likely schema mismatch). Trying safe fetch without reminder columns.', error);
+            const fallback = await supabase
+                .from('requisitions')
+                .select(safeColumns) // STILL NO ATTACHMENTS!
+                .order('created_at', { ascending: false });
+            
+            data = fallback.data;
+            error = fallback.error;
+        }
+
+        if (error) {
+            console.error('Error fetching requisitions:', JSON.stringify(error));
             return;
         }
 
         if (data && data.length > 0) {
-            const mapped = data.map(mapToRequisition);
+            const mapped = data.reduce((acc: Requisition[], row: any) => {
+                try {
+                    const req = mapToRequisition(row);
+                    acc.push(req);
+                } catch (e) {
+                    console.error('Failed to map requisition row:', row, e);
+                }
+                return acc;
+            }, []);
             setRequisitions(mapped);
         } else {
             setRequisitions([]); 
@@ -112,11 +164,9 @@ export const RequisitionProvider: React.FC<{ children: React.ReactNode }> = ({ c
   useEffect(() => {
     fetchRequisitions();
 
-    // Setup Realtime Subscription
     const subscription = supabase
       .channel('public:requisitions')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'requisitions' }, (payload) => {
-        // On any change, refetch to sync
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'requisitions' }, () => {
         fetchRequisitions();
       })
       .subscribe();
@@ -127,7 +177,6 @@ export const RequisitionProvider: React.FC<{ children: React.ReactNode }> = ({ c
   }, [user]);
 
   const addRequisition = async (req: Requisition) => {
-    // Optimistic Update
     setRequisitions(prev => [req, ...prev]);
 
     if (user) {
@@ -137,16 +186,16 @@ export const RequisitionProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
         if (error) {
             console.error('Error adding requisition to DB:', error);
-            // Revert optimistic update on failure to avoid ghost items
+            // Revert on failure
             setRequisitions(prev => prev.filter(r => r.id !== req.id));
-            // IMPORTANT: Throw error so calling component knows it failed
-            throw new Error(error.message);
+            alert(`Failed to save: ${error.message}`); 
+            throw error;
         }
     }
   };
 
   const updateRequisition = async (updatedReq: Requisition) => {
-    // Optimistic Update
+    // Optimistic UI update
     setRequisitions(prev => prev.map(req => req.id === updatedReq.id ? updatedReq : req));
 
     if (user) {
@@ -157,6 +206,7 @@ export const RequisitionProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
         if (error) {
             console.error('Error updating requisition in DB:', error);
+            // We could revert here, but for now we just log
         }
     }
   };

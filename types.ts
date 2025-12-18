@@ -138,6 +138,10 @@ export interface Requisition {
   approverId?: string;
   rejectionReason?: string;
   
+  // Reminder System
+  lastRemindedAt?: string;
+  reminderCount?: number;
+
   // Attachments (Can be string URLs or File objects converted to ObjectURLs)
   attachments?: { name: string; url: string; type: string }[];
   

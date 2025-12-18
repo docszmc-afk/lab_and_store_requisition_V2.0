@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { useRequisition } from '../contexts/RequisitionContext';
 import { StatusBadge, UrgencyBadge, StageBadge } from '../components/StatusBadge';
-import { Search, Filter, Eye, Edit2, AlertCircle, Bell, X } from 'lucide-react';
+import { Search, Filter, Eye, Edit2, AlertCircle, Bell, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { RequisitionStatus, Requisition, WorkflowStage, UserRole } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -11,6 +11,9 @@ import { formatDate, isUserTurn } from '../utils';
 const Requisitions: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState<'all' | 'action'>('all');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
+  
   const { requisitions } = useRequisition();
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -31,7 +34,13 @@ const Requisitions: React.FC = () => {
     setSearchParams({});
     setActiveTab('all');
     setSearchTerm('');
+    setCurrentPage(1);
   };
+
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, activeTab, statusFilter, urgencyFilter]);
 
   // Filter Logic
   const filtered = requisitions.filter(req => {
@@ -65,6 +74,10 @@ const Requisitions: React.FC = () => {
     }
     return true;
   });
+
+  // Calculate Pagination
+  const totalPages = Math.ceil(filtered.length / itemsPerPage);
+  const paginatedItems = filtered.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
   // Calculate count for badge
   const actionCount = requisitions.filter(r => isUserTurn(r, user)).length;
@@ -140,7 +153,7 @@ const Requisitions: React.FC = () => {
           </div>
       )}
 
-      <div className="bg-white rounded-xl shadow-sm border border-stone-200 overflow-hidden">
+      <div className="bg-white rounded-xl shadow-sm border border-stone-200 overflow-hidden flex flex-col">
         {filtered.length === 0 ? (
           <div className="p-12 text-center text-gray-500">
             {activeTab === 'action' 
@@ -170,7 +183,7 @@ const Requisitions: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {filtered.map((req) => {
+                {paginatedItems.map((req) => {
                   const active = isUserTurn(req, user);
                   return (
                     <tr 
@@ -235,6 +248,51 @@ const Requisitions: React.FC = () => {
                 })}
               </tbody>
             </table>
+          </div>
+        )}
+        
+        {/* Pagination Footer */}
+        {filtered.length > 0 && (
+          <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 flex items-center justify-between">
+             <p className="text-sm text-gray-500">
+               Showing <span className="font-medium">{(currentPage - 1) * itemsPerPage + 1}</span> to <span className="font-medium">{Math.min(currentPage * itemsPerPage, filtered.length)}</span> of <span className="font-medium">{filtered.length}</span> results
+             </p>
+             
+             {totalPages > 1 && (
+               <div className="flex items-center gap-2">
+                 <button 
+                   onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                   disabled={currentPage === 1}
+                   className="p-2 rounded-lg border border-gray-300 text-gray-600 hover:bg-white disabled:opacity-50 disabled:hover:bg-transparent transition-colors"
+                 >
+                   <ChevronLeft size={16} />
+                 </button>
+                 
+                 <div className="flex items-center gap-1">
+                    {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
+                        <button
+                          key={page}
+                          onClick={() => setCurrentPage(page)}
+                          className={`w-8 h-8 rounded-lg text-sm font-medium transition-colors ${
+                              currentPage === page 
+                              ? 'bg-zankli-orange text-white' 
+                              : 'text-gray-600 hover:bg-gray-200'
+                          }`}
+                        >
+                            {page}
+                        </button>
+                    ))}
+                 </div>
+
+                 <button 
+                   onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                   disabled={currentPage === totalPages}
+                   className="p-2 rounded-lg border border-gray-300 text-gray-600 hover:bg-white disabled:opacity-50 disabled:hover:bg-transparent transition-colors"
+                 >
+                   <ChevronRight size={16} />
+                 </button>
+               </div>
+             )}
           </div>
         )}
       </div>
