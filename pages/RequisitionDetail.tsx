@@ -23,21 +23,19 @@ const RequisitionDetail: React.FC = () => {
   const [localReq, setLocalReq] = useState<Requisition | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Fetch Full Details (Including Attachments) on Mount
   useEffect(() => {
     let isMounted = true;
     const fetchFullDetails = async () => {
       if (!id) return;
+      
+      // Step 1: Immediate low-fidelity load from context
       const contextReq = requisitions.find(r => r.id === id);
-      if (contextReq) {
-        if (isMounted) {
-            setLocalReq(contextReq);
-            if (contextReq.items && contextReq.items.length > 0) {
-                setLoading(false);
-            } else {
-                setLoading(true);
-            }
-        }
+      if (contextReq && isMounted) {
+        setLocalReq(contextReq);
       }
+
+      // Step 2: Full-fidelity load from DB (including base64 attachments)
       try {
         const { data, error } = await supabase.from('requisitions').select('*').eq('id', id).single();
         if (isMounted && data && !error) {
@@ -54,7 +52,7 @@ const RequisitionDetail: React.FC = () => {
            };
            setLocalReq(fullData);
            setLoading(false);
-        } else if (isMounted) {
+        } else {
            setLoading(false);
         }
       } catch (err) {
@@ -72,10 +70,6 @@ const RequisitionDetail: React.FC = () => {
   const [reminderSent, setReminderSent] = useState(false);
   const [nextAuditStage, setNextAuditStage] = useState<WorkflowStage.AUDIT_ONE | WorkflowStage.AUDIT_TWO | null>(null);
   const [isDirectApproval, setIsDirectApproval] = useState(false);
-  const [showPaymentForm, setShowPaymentForm] = useState(false);
-  const [paymentAmount, setPaymentAmount] = useState<number | ''>('');
-  const [paymentNote, setPaymentNote] = useState('');
-  const [paymentFile, setPaymentFile] = useState<{name: string, url: string} | null>(null);
 
   const isEmergencyDrug1Month = req?.type === RequisitionType.EMERGENCY_DRUG_PURCHASE_1_MONTH;
   const isEmergencyDrug1Week = req?.type === RequisitionType.EMERGENCY_DRUG_PURCHASE_1_WEEK;
@@ -86,7 +80,6 @@ const RequisitionDetail: React.FC = () => {
   const isLabPO = req?.type === RequisitionType.LAB_PURCHASE_ORDER;
 
   const isStoreCheck = user?.role === UserRole.PHARMACY && req?.currentStage === WorkflowStage.STORE_CHECK;
-  const isChairmanCheck = user?.role === UserRole.CHAIRMAN && req?.currentStage === WorkflowStage.CHAIRMAN_INITIAL;
   
   const isApprover = !isStoreCheck && (
     (user?.role === UserRole.CHAIRMAN && (req?.currentStage === WorkflowStage.CHAIRMAN_INITIAL || req?.currentStage === WorkflowStage.CHAIRMAN_FINAL)) ||
@@ -94,8 +87,6 @@ const RequisitionDetail: React.FC = () => {
     (user?.role === UserRole.FINANCE && req?.currentStage === WorkflowStage.HOF_APPROVAL)
   );
   
-  const isAccountView = user?.role === UserRole.ACCOUNTS && (req?.status === RequisitionStatus.APPROVED || req?.status === RequisitionStatus.FULFILLED);
-
   const isTurn = useMemo(() => {
     if (!req || !user) return false;
     return isUserTurn(req, user);
@@ -106,8 +97,6 @@ const RequisitionDetail: React.FC = () => {
     return req.items.reduce((sum, item) => item.isAvailable !== false ? sum + ((item.unitPrice || 0) * item.quantity) : sum, 0);
   }, [req]);
   
-  const totalPaid = useMemo(() => req?.payments?.reduce((sum, p) => sum + p.amount, 0) || 0, [req?.payments]);
-
   const handleBack = () => req?.parentId ? navigate(`/requisitions/${req.parentId}`) : navigate('/requisitions');
 
   // REMINDER LOGIC
@@ -118,7 +107,7 @@ const RequisitionDetail: React.FC = () => {
   }, [user, req, isTurn]);
 
   const handleSendReminder = async (e: React.MouseEvent) => {
-    e.stopPropagation(); // Prevent any parent click handlers
+    e.stopPropagation(); 
     if (!req || isReminding) return;
 
     setIsReminding(true);
@@ -126,7 +115,6 @@ const RequisitionDetail: React.FC = () => {
         const newCount = (req.reminderCount || 0) + 1;
         const now = new Date().toISOString();
         
-        // Use direct Supabase call for speed (partial update to avoid lag with attachments)
         const { error } = await supabase
             .from('requisitions')
             .update({
@@ -138,35 +126,14 @@ const RequisitionDetail: React.FC = () => {
 
         if (error) throw error;
         
-        // Update local context manually to show success instantly
         await refresh(); 
         setReminderSent(true);
-        setTimeout(() => setReminderSent(false), 3000); // Reset button after 3s
+        setTimeout(() => setReminderSent(false), 3000); 
     } catch (e: any) {
         console.error("Reminder failed:", e);
-        alert("Failed to send reminder. Ensure columns last_reminded_at and reminder_count exist in DB.");
+        alert("Failed to send reminder.");
     } finally {
         setIsReminding(false);
-    }
-  };
-
-  const handleLocalUpdate = (itemId: string, field: keyof RequisitionItem, value: any) => {
-    if (!localReq) return;
-    const updatedItems = localReq.items.map(item => item.id === itemId ? { ...item, [field]: value } : item);
-    setLocalReq({ ...localReq, items: updatedItems });
-  };
-
-  const handlePersistUpdate = async () => localReq && await updateRequisition(localReq);
-
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0 && req) {
-      const file = e.target.files[0];
-      try {
-        const base64 = await fileToBase64(file);
-        const updatedReq = { ...req, attachments: [...(req.attachments || []), { name: file.name, url: base64, type: file.type }] };
-        setLocalReq(updatedReq);
-        updateRequisition(updatedReq);
-      } catch (error) { alert("Upload failed"); }
     }
   };
 
@@ -183,7 +150,13 @@ const RequisitionDetail: React.FC = () => {
   const handleDownloadPDF = () => {
     const element = document.getElementById('requisition-content');
     if (!element || !req) return;
-    const opt = { margin: 10, filename: `Req_${req.id.split('-')[1] || req.id}.pdf`, image: { type: 'jpeg', quality: 0.98 }, html2canvas: { scale: 2, useCORS: true }, jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' } };
+    const opt = { 
+      margin: 10, 
+      filename: `Req_${req.id.split('-')[1] || req.id}.pdf`, 
+      image: { type: 'jpeg', quality: 0.98 }, 
+      html2canvas: { scale: 2, useCORS: true, logging: false }, 
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' } 
+    };
     html2pdf().set(opt).from(element).save();
   };
 
@@ -191,7 +164,6 @@ const RequisitionDetail: React.FC = () => {
     if (!req || !user) return;
     const newApproval: Approval = { id: `app_${Date.now()}`, approverId: user.id, approverName: user.name, role: user.role, department: user.department, stage: req.currentStage || WorkflowStage.CHAIRMAN_INITIAL, timestamp: new Date().toISOString(), signatureType: type, signatureData: data, comment: comment };
     
-    // Reset reminderCount to 0 to dismiss the emergency bar for the next approver
     let updatedReq: Requisition = { ...req, approvals: [...(req.approvals || []), newApproval], reminderCount: 0 }; 
 
     if (pendingAction === 'REJECT') {
@@ -255,15 +227,15 @@ const RequisitionDetail: React.FC = () => {
 
   const isBoxActive = (stage: WorkflowStage) => user && req?.currentStage === stage && ((stage === WorkflowStage.CHAIRMAN_INITIAL && user.role === UserRole.CHAIRMAN) || (stage === WorkflowStage.STORE_CHECK && user.role === UserRole.PHARMACY) || (stage === WorkflowStage.AUDIT_ONE && user.role === UserRole.AUDIT) || (stage === WorkflowStage.AUDIT_TWO && user.role === UserRole.AUDIT) || (stage === WorkflowStage.CHAIRMAN_FINAL && user.role === UserRole.CHAIRMAN) || (stage === WorkflowStage.HOF_APPROVAL && user.role === UserRole.FINANCE));
 
-  if (loading) return <div className="p-12 text-center text-gray-500"><RefreshCcw className="animate-spin mb-2" /> Loading...</div>;
-  if (!req) return <div className="p-8 text-center">Not found</div>;
+  if (loading && !localReq) return <div className="p-12 text-center text-gray-500"><RefreshCcw className="animate-spin mb-2" /> Loading full request details...</div>;
+  if (!req) return <div className="p-8 text-center text-gray-400">Requisition not found.</div>;
 
   return (
     <div className="space-y-6 pb-20">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4" data-html2canvas-ignore>
         <button onClick={handleBack} className="flex items-center gap-2 text-gray-500 hover:text-gray-900"><ArrowLeft size={20} /> Back</button>
         <div className="flex items-center gap-2">
-           <button onClick={handleDownloadPDF} className="flex items-center gap-2 px-4 py-2 text-sm text-white bg-gray-900 rounded-lg"><Download size={16} /> PDF</button>
+           <button onClick={handleDownloadPDF} className="flex items-center gap-2 px-4 py-2 text-sm text-white bg-gray-900 rounded-lg shadow hover:bg-black transition-colors"><Download size={16} /> Download PDF</button>
            <StatusBadge status={req.status} /><StageBadge stage={req.currentStage} />
         </div>
       </div>
@@ -272,9 +244,9 @@ const RequisitionDetail: React.FC = () => {
         <div className="bg-gradient-to-r from-orange-600 to-orange-700 text-white px-6 py-4 rounded-xl shadow-lg flex items-center justify-between gap-4" data-html2canvas-ignore>
           <div className="flex items-center gap-4">
             <div className="p-3 bg-white/20 rounded-full animate-pulse"><PenTool size={24} /></div>
-            <div><h3 className="font-bold text-lg">Action Required</h3><p className="text-orange-100 text-sm">Please review and sign.</p></div>
+            <div><h3 className="font-bold text-lg">Action Required</h3><p className="text-orange-100 text-sm">Please review and sign this request.</p></div>
           </div>
-          <button onClick={() => document.querySelector('#authorization-section')?.scrollIntoView({ behavior: 'smooth' })} className="bg-white text-orange-700 px-6 py-2 rounded-lg font-bold text-sm">Sign Now</button>
+          <button onClick={() => document.querySelector('#authorization-section')?.scrollIntoView({ behavior: 'smooth' })} className="bg-white text-orange-700 px-6 py-2 rounded-lg font-bold text-sm">Review & Sign</button>
         </div>
       )}
 
@@ -289,13 +261,7 @@ const RequisitionDetail: React.FC = () => {
                 disabled={isReminding || reminderSent}
                 className={`px-5 py-2.5 rounded-lg font-bold text-sm flex items-center gap-2 transition-all transform active:scale-95 shadow-md ${reminderSent ? 'bg-green-600 text-white' : 'bg-red-600 text-white hover:bg-red-700'}`}
             >
-                {isReminding ? (
-                    <RefreshCcw size={14} className="animate-spin" />
-                ) : reminderSent ? (
-                    <CheckCircle size={16} />
-                ) : (
-                    <Zap size={16} fill="currentColor" />
-                )}
+                {isReminding ? <RefreshCcw size={14} className="animate-spin" /> : reminderSent ? <CheckCircle size={16} /> : <Zap size={16} fill="currentColor" />}
                 {reminderSent ? 'Reminder Sent!' : 'Send Urgent Reminder'}
             </button>
          </div>
@@ -308,9 +274,9 @@ const RequisitionDetail: React.FC = () => {
                 <div className="text-center mb-12 border-b-2 border-black pb-4"><h1 className="text-2xl font-bold uppercase underline">Emergency Drug Approval</h1></div>
                 <div className="space-y-8">
                     <div className="flex gap-2"><strong>DATE:</strong> <span className="border-b border-dotted flex-1">{formatDate(req.createdAt)}</span></div>
-                    <div className="flex gap-2"><strong>PLEASE PAY:</strong> <span className="border-b border-black flex-1 font-bold">{req.items[0].payee || req.requesterName}</span></div>
-                    <div className="flex gap-2"><strong>THE SUM OF:</strong> <span className="border-b border-black flex-1 font-bold">₦{req.items[0].unitPrice?.toLocaleString()}</span></div>
-                    <div className="flex gap-2"><strong>BEING:</strong> <span className="border-b border-black flex-1">{req.items[0].notes || req.title}</span></div>
+                    <div className="flex gap-2"><strong>PLEASE PAY:</strong> <span className="border-b border-black flex-1 font-bold">{req.items[0]?.payee || req.requesterName}</span></div>
+                    <div className="flex gap-2"><strong>THE SUM OF:</strong> <span className="border-b border-black flex-1 font-bold">₦{req.items[0]?.unitPrice?.toLocaleString()}</span></div>
+                    <div className="flex gap-2"><strong>BEING:</strong> <span className="border-b border-black flex-1">{req.items[0]?.notes || req.title}</span></div>
                 </div>
                 <div className="mt-16 space-y-4">
                     {renderLetterSignature(WorkflowStage.REQUESTER, "APPLICANT")}
@@ -353,15 +319,30 @@ const RequisitionDetail: React.FC = () => {
                 </div>
             </div>
           )}
+
+          {/* ATTACHMENTS SECTION - Rendered here so it is included in PDF and visible to approvers */}
+          {req.attachments && req.attachments.length > 0 && (
+            <div className="mt-8 space-y-4">
+              <h3 className="text-lg font-bold text-gray-900 border-b-2 border-zankli-orange pb-2 flex items-center gap-2">
+                <Upload size={20} /> Supporting Documents
+              </h3>
+              <div className="grid grid-cols-1 gap-6">
+                {req.attachments.map((file, idx) => (
+                  <FilePreview key={idx} url={file.url} name={file.name} type={file.type} />
+                ))}
+              </div>
+            </div>
+          )}
         </div>
+        
         <div className="space-y-6" data-html2canvas-ignore>
            {isApprover && (
             <div className="bg-white p-6 rounded-xl shadow-sm border border-zankli-orange">
                <h3 className="text-lg font-bold mb-4">Action Panel</h3>
                <div className="space-y-3">
-                 <button onClick={() => handleApprove()} className="w-full py-3 bg-green-600 text-white rounded-lg font-bold">Approve</button>
-                 <button onClick={handleReject} className="w-full py-2 bg-white border border-gray-300 text-red-600 rounded-lg text-sm">Reject</button>
-                 <button onClick={handleReturn} className="w-full py-2 bg-white border border-gray-300 text-amber-600 rounded-lg text-sm">Return</button>
+                 <button onClick={() => handleApprove()} className="w-full py-3 bg-green-600 text-white rounded-lg font-bold hover:bg-green-700 transition-colors">Approve Request</button>
+                 <button onClick={handleReject} className="w-full py-2 bg-white border border-gray-300 text-red-600 rounded-lg text-sm hover:bg-red-50 transition-colors">Reject Request</button>
+                 <button onClick={handleReturn} className="w-full py-2 bg-white border border-gray-300 text-amber-600 rounded-lg text-sm hover:bg-amber-50 transition-colors">Return for Correction</button>
                </div>
             </div>
            )}

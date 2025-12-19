@@ -27,7 +27,6 @@ export const RequisitionProvider: React.FC<{ children: React.ReactNode }> = ({ c
         try { items = JSON.parse(row.items); } catch(e) { console.warn('Failed to parse items for req', row.id); }
     }
 
-    // Attachments should ideally be empty in list view for performance
     let attachments = [];
     if (Array.isArray(row.attachments)) attachments = row.attachments;
     else if (typeof row.attachments === 'string') {
@@ -89,15 +88,13 @@ export const RequisitionProvider: React.FC<{ children: React.ReactNode }> = ({ c
       rejection_reason: req.rejectionReason,
       parent_id: req.parentId,
       is_parent: req.isParent,
-      child_requisition_ids: req.childRequisitionIds
+      child_requisition_ids: req.childRequisitionIds,
+      attachments: req.attachments,
+      approvals: req.approvals,
+      payments: req.payments,
+      last_reminded_at: req.lastRemindedAt,
+      reminder_count: req.reminderCount
     };
-
-    // Only include heavy fields if they are actually present in the object
-    if (req.attachments !== undefined) payload.attachments = req.attachments;
-    if (req.approvals !== undefined) payload.approvals = req.approvals;
-    if (req.payments) payload.payments = req.payments;
-    if (req.lastRemindedAt) payload.last_reminded_at = req.lastRemindedAt;
-    if (req.reminderCount !== undefined) payload.reminder_count = req.reminderCount;
 
     return payload;
   };
@@ -109,27 +106,22 @@ export const RequisitionProvider: React.FC<{ children: React.ReactNode }> = ({ c
     }
 
     try {
-        // PERFORMANCE CRITICAL: 
-        // We explicitly define columns to exclude 'attachments'.
-        // This makes the query lightweight and fast.
+        // ESSENTIAL ONLY: We remove 'attachments' to restore speed. 
+        // We also check for 'last_reminded_at' carefully.
+        const baseColumns = 'id,requester_id,requester_name,department,type,title,created_at,updated_at,status,current_stage,urgency,items,approvals,payments,rejection_reason,parent_id,is_parent,child_requisition_ids';
         
-        // Strategy 1: Ideal Query (Includes reminder columns)
-        const idealColumns = 'id,requester_id,requester_name,department,type,title,created_at,updated_at,status,current_stage,urgency,items,approvals,payments,rejection_reason,parent_id,is_parent,child_requisition_ids,last_reminded_at,reminder_count';
-        
-        // Strategy 2: Safe Fallback (Excludes reminder columns if migration hasn't run yet, BUT STILL EXCLUDES ATTACHMENTS)
-        const safeColumns = 'id,requester_id,requester_name,department,type,title,created_at,updated_at,status,current_stage,urgency,items,approvals,payments,rejection_reason,parent_id,is_parent,child_requisition_ids';
-
+        // Try to fetch with reminder columns first
         let { data, error } = await supabase
             .from('requisitions')
-            .select(idealColumns)
+            .select(`${baseColumns},last_reminded_at,reminder_count`)
             .order('created_at', { ascending: false });
 
-        // If ideal query fails (likely due to missing reminder columns), use safe fallback
+        // Fallback to absolute basics if that fails (likely missing columns)
         if (error) {
-            console.warn('Optimized fetch failed (likely schema mismatch). Trying safe fetch without reminder columns.', error);
+            console.warn('Reminder columns missing, falling back to base columns');
             const fallback = await supabase
                 .from('requisitions')
-                .select(safeColumns) // STILL NO ATTACHMENTS!
+                .select(baseColumns)
                 .order('created_at', { ascending: false });
             
             data = fallback.data;
@@ -137,27 +129,16 @@ export const RequisitionProvider: React.FC<{ children: React.ReactNode }> = ({ c
         }
 
         if (error) {
-            console.error('Error fetching requisitions:', JSON.stringify(error));
+            console.error('CRITICAL: Error fetching requisitions:', error.message);
             return;
         }
 
-        if (data && data.length > 0) {
-            const mapped = data.reduce((acc: Requisition[], row: any) => {
-                try {
-                    const req = mapToRequisition(row);
-                    acc.push(req);
-                } catch (e) {
-                    console.error('Failed to map requisition row:', row, e);
-                }
-                return acc;
-            }, []);
+        if (data) {
+            const mapped = data.map(row => mapToRequisition(row));
             setRequisitions(mapped);
-        } else {
-            setRequisitions([]); 
         }
     } catch (err) {
         console.error('Fetch exception:', err);
-        setRequisitions([]);
     }
   };
 
@@ -185,17 +166,13 @@ export const RequisitionProvider: React.FC<{ children: React.ReactNode }> = ({ c
             .insert([mapFromRequisition(req)]);
 
         if (error) {
-            console.error('Error adding requisition to DB:', error);
-            // Revert on failure
             setRequisitions(prev => prev.filter(r => r.id !== req.id));
-            alert(`Failed to save: ${error.message}`); 
             throw error;
         }
     }
   };
 
   const updateRequisition = async (updatedReq: Requisition) => {
-    // Optimistic UI update
     setRequisitions(prev => prev.map(req => req.id === updatedReq.id ? updatedReq : req));
 
     if (user) {
@@ -206,7 +183,6 @@ export const RequisitionProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
         if (error) {
             console.error('Error updating requisition in DB:', error);
-            // We could revert here, but for now we just log
         }
     }
   };
