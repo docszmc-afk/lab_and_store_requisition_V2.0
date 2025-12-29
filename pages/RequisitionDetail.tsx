@@ -94,7 +94,7 @@ const RequisitionDetail: React.FC = () => {
 
   const grandTotal = useMemo(() => {
     if (!req) return 0;
-    return req.items.reduce((sum, item) => item.isAvailable !== false ? sum + ((item.unitPrice || 0) * item.quantity) : sum, 0);
+    return req.items.reduce((sum, item) => item.isAvailable !== false ? sum + ((item.unitPrice || 0) * (item.quantity || 1)) : sum, 0);
   }, [req]);
   
   const handleBack = () => req?.parentId ? navigate(`/requisitions/${req.parentId}`) : navigate('/requisitions');
@@ -282,6 +282,63 @@ const RequisitionDetail: React.FC = () => {
                     {renderLetterSignature(WorkflowStage.REQUESTER, "APPLICANT")}
                     {renderLetterSignature(WorkflowStage.AUDIT_ONE, "AUDIT 1")}
                     {renderLetterSignature(WorkflowStage.CHAIRMAN_FINAL, "CHAIRMAN")}
+                </div>
+            </div>
+          ) : isHistology ? (
+            <div className="bg-white p-8 rounded-xl shadow-sm border border-stone-200">
+                <div className="flex items-center gap-4 mb-8 border-b-2 border-zankli-orange pb-6">
+                  <div className="w-12 h-12 bg-zankli-black text-white flex items-center justify-center font-bold text-xl rounded">Z</div>
+                  <h1 className="text-2xl font-bold">Zankli Medical Centre</h1>
+                </div>
+                <h2 className="text-xl font-bold mb-4">Outsourced Histology Payment - {req.title}</h2>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200 text-[10px] md:text-xs">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-2 py-2 text-left font-bold uppercase">Date</th>
+                        <th className="px-2 py-2 text-left font-bold uppercase">Patient Name</th>
+                        <th className="px-2 py-2 text-left font-bold uppercase">Hosp/Lab No.</th>
+                        <th className="px-2 py-2 text-left font-bold uppercase">Service/Test</th>
+                        <th className="px-2 py-2 text-right font-bold uppercase">Bill (₦)</th>
+                        <th className="px-2 py-2 text-right font-bold uppercase">ZMC (₦)</th>
+                        <th className="px-2 py-2 text-left font-bold uppercase">Ref/Retain</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {req.items.map(item => (
+                        <tr key={item.id}>
+                          <td className="px-2 py-3 whitespace-nowrap">{formatDate(item.customDate || '')}</td>
+                          <td className="px-2 py-3 font-medium">{item.patientName}</td>
+                          <td className="px-2 py-3">{item.hospitalNumber} / {item.labNumber}</td>
+                          <td className="px-2 py-3">{item.name}</td>
+                          <td className="px-2 py-3 text-right">₦{item.unitPrice?.toLocaleString()}</td>
+                          <td className="px-2 py-3 text-right">₦{item.zmcPrice?.toLocaleString()}</td>
+                          <td className="px-2 py-3">
+                            {item.paymentReference}
+                            {item.retainership && <div className="text-[9px] text-gray-400">{item.retainership}</div>}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot className="bg-gray-100 font-bold">
+                      <tr>
+                        <td colSpan={4} className="px-2 py-3 text-right">TOTAL OUTSOURCE BILL</td>
+                        <td className="px-2 py-3 text-right text-zankli-orange text-sm">₦{grandTotal.toLocaleString()}</td>
+                        <td colSpan={2}></td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+                <div className="mt-8 border-t pt-8" id="authorization-section">
+                   <h3 className="font-bold mb-4">Authorizations</h3>
+                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                     {req.approvals.map(a => (
+                        <div key={a.id} className="p-3 border rounded-lg bg-gray-50 flex items-center gap-3">
+                           <div className="w-12 h-12 rounded-full border-2 border-blue-800 flex items-center justify-center text-blue-900 rotate-[-12deg] text-[6px] font-bold">STAMP</div>
+                           <div className="text-xs"><strong>{a.approverName}</strong><p className="text-gray-500">{a.stage}</p></div>
+                        </div>
+                     ))}
+                   </div>
                 </div>
             </div>
           ) : (
