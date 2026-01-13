@@ -524,7 +524,7 @@ const NewRequisition: React.FC = () => {
                         />
                       </div>
                       
-                      {isEmergencyDrug1Month && (
+                      { (isEmergencyDrug1Month || isEmergencyDrug1Week) && (
                         <div>
                           <label className="block text-xs font-medium text-gray-500 uppercase mb-1">Please Pay (Payee)</label>
                           <input

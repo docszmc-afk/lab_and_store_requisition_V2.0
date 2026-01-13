@@ -1,6 +1,6 @@
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { Requisition } from '../types';
+import { Requisition, UserRole, RequisitionType } from '../types';
 import { supabase } from '../lib/supabase';
 import { useAuth } from './AuthContext';
 
@@ -106,19 +106,14 @@ export const RequisitionProvider: React.FC<{ children: React.ReactNode }> = ({ c
     }
 
     try {
-        // ESSENTIAL ONLY: We remove 'attachments' to restore speed. 
-        // We also check for 'last_reminded_at' carefully.
         const baseColumns = 'id,requester_id,requester_name,department,type,title,created_at,updated_at,status,current_stage,urgency,items,approvals,payments,rejection_reason,parent_id,is_parent,child_requisition_ids';
         
-        // Try to fetch with reminder columns first
         let { data, error } = await supabase
             .from('requisitions')
             .select(`${baseColumns},last_reminded_at,reminder_count`)
             .order('created_at', { ascending: false });
 
-        // Fallback to absolute basics if that fails (likely missing columns)
         if (error) {
-            console.warn('Reminder columns missing, falling back to base columns');
             const fallback = await supabase
                 .from('requisitions')
                 .select(baseColumns)
@@ -135,7 +130,53 @@ export const RequisitionProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
         if (data) {
             const mapped = data.map(row => mapToRequisition(row));
-            setRequisitions(mapped);
+            
+            // ROLE-BASED VISIBILITY FILTERING
+            const isGlobalRole = [
+                UserRole.CHAIRMAN,
+                UserRole.AUDIT,
+                UserRole.FINANCE,
+                UserRole.ACCOUNTS,
+                UserRole.ADMIN
+            ].includes(user.role);
+
+            if (isGlobalRole) {
+                setRequisitions(mapped);
+            } else {
+                // Define department-specific types
+                const labTypes = [
+                    RequisitionType.LAB_PURCHASE_ORDER,
+                    RequisitionType.EQUIPMENT_REQUEST,
+                    RequisitionType.OUTSOURCED_HISTOLOGY_PAYMENT
+                ];
+                
+                const pharmacyTypes = [
+                    RequisitionType.PHARMACY_PURCHASE_ORDER,
+                    RequisitionType.EMERGENCY_DRUG_PURCHASE_1_MONTH,
+                    RequisitionType.EMERGENCY_DRUG_PURCHASE_1_WEEK,
+                    RequisitionType.DAILY_DRUG_PURCHASE
+                ];
+
+                const filtered = mapped.filter(req => {
+                    // Always show if user is the one who created it
+                    if (req.requesterId === user.id) return true;
+
+                    // Lab Admin should see everything Lab-related
+                    if (user.role === UserRole.LAB) {
+                        return labTypes.includes(req.type) || req.department?.toLowerCase().includes('lab');
+                    }
+
+                    // Pharmacy Admin should see everything Pharmacy-related
+                    if (user.role === UserRole.PHARMACY) {
+                        return pharmacyTypes.includes(req.type) || req.department?.toLowerCase().includes('pharm');
+                    }
+
+                    // Default fallback: match exact department string
+                    return req.department === user.department;
+                });
+                
+                setRequisitions(filtered);
+            }
         }
     } catch (err) {
         console.error('Fetch exception:', err);

@@ -80,6 +80,7 @@ const RequisitionDetail: React.FC = () => {
   const isLabPO = req?.type === RequisitionType.LAB_PURCHASE_ORDER;
 
   const isStoreCheck = user?.role === UserRole.PHARMACY && req?.currentStage === WorkflowStage.STORE_CHECK;
+  const isChairmanCheck = user?.role === UserRole.CHAIRMAN && req?.currentStage === WorkflowStage.CHAIRMAN_INITIAL;
   
   const isApprover = !isStoreCheck && (
     (user?.role === UserRole.CHAIRMAN && (req?.currentStage === WorkflowStage.CHAIRMAN_INITIAL || req?.currentStage === WorkflowStage.CHAIRMAN_FINAL)) ||
@@ -138,7 +139,9 @@ const RequisitionDetail: React.FC = () => {
   };
 
   const handleApprove = (destination?: WorkflowStage.AUDIT_ONE | WorkflowStage.AUDIT_TWO) => {
-    setIsDirectApproval(false);
+    // If a destination is provided (Audit 1 or 2), it is NOT a direct approval.
+    // If NO destination is provided, it is a direct approval (completes the request).
+    setIsDirectApproval(destination ? false : true);
     setNextAuditStage(destination || null);
     setPendingAction('APPROVE');
     setShowSignatureModal(true);
@@ -397,7 +400,34 @@ const RequisitionDetail: React.FC = () => {
             <div className="bg-white p-6 rounded-xl shadow-sm border border-zankli-orange">
                <h3 className="text-lg font-bold mb-4">Action Panel</h3>
                <div className="space-y-3">
-                 <button onClick={() => handleApprove()} className="w-full py-3 bg-green-600 text-white rounded-lg font-bold hover:bg-green-700 transition-colors">Approve Request</button>
+                 {/* Main Approval Button */}
+                 <button 
+                  onClick={() => handleApprove()} 
+                  className="w-full py-3 bg-green-600 text-white rounded-lg font-bold hover:bg-green-700 transition-colors"
+                 >
+                   { (isEquipmentRequest || isDailyDrugPurchase) && isChairmanCheck ? 'Approve & Complete' : 'Approve Request' }
+                 </button>
+
+                 {/* Workflow Routing Options for Chairman (Equipment/Daily Purchase) */}
+                 {(isEquipmentRequest || isDailyDrugPurchase) && isChairmanCheck && (
+                    <div className="grid grid-cols-2 gap-2 pt-2 border-t border-orange-100">
+                      <button 
+                        onClick={() => handleApprove(WorkflowStage.AUDIT_ONE)} 
+                        className="py-2 px-1 text-[10px] font-bold bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 uppercase"
+                        title="Route to Audit 1 for verification"
+                      >
+                        Refer to Audit 1
+                      </button>
+                      <button 
+                        onClick={() => handleApprove(WorkflowStage.AUDIT_TWO)} 
+                        className="py-2 px-1 text-[10px] font-bold bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 uppercase"
+                        title="Route to Audit 2 for verification"
+                      >
+                        Refer to Audit 2
+                      </button>
+                    </div>
+                 )}
+
                  <button onClick={handleReject} className="w-full py-2 bg-white border border-gray-300 text-red-600 rounded-lg text-sm hover:bg-red-50 transition-colors">Reject Request</button>
                  <button onClick={handleReturn} className="w-full py-2 bg-white border border-gray-300 text-amber-600 rounded-lg text-sm hover:bg-amber-50 transition-colors">Return for Correction</button>
                </div>

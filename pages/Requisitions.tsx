@@ -52,6 +52,9 @@ const Requisitions: React.FC = () => {
         if (statusFilter === 'Approved') {
             // Group Approved and Fulfilled for general 'Approved' view
             if (req.status !== RequisitionStatus.APPROVED && req.status !== RequisitionStatus.FULFILLED) return false;
+        } else if (statusFilter === 'Pending') {
+            // Map 'Pending' from Dashboard card to 'Pending Approval' status
+            if (req.status !== RequisitionStatus.PENDING) return false;
         } else {
              if (req.status !== statusFilter) return false;
         }
